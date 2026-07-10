@@ -1,15 +1,26 @@
-const os = require('os');
+const http = require('http');
 const chalk = require('chalk');
 
-console.log(chalk.blue.bold("---------------------------------------"));
-console.log(chalk.green.bold("Node.js Runtime Engine Initialized!"));
-console.log(chalk.blue.bold("---------------------------------------"));
+const PORT = 3000;
+const HOST = 'localhost';
+const server = http.createServer((req, res) => {
+    console.log(chalk.magenta(`📡 [Incoming Request]: ${req.method} path request to: ${req.url}`));
 
-const totalMemoryGB = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2);
-const freeMemoryGB = (os.freemem() / 1024 / 1024 / 1024).toFixed(2);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
 
-console.log(`${chalk.yellow("OS Platform:")} ${os.platform()}`);
-console.log(`${chalk.yellow("CPU Architecture:")} ${os.arch()}`);
-console.log(`${chalk.cyan("Total System Memory:")} ${totalMemoryGB} GB`);
-console.log(`${chalk.cyan(" Free System Memory:")} ${freeMemoryGB} GB`);
-console.log(chalk.blue.bold("---------------------------------------"));
+    const serverPayload = {
+        status: "Online",
+        message: "Secure backend engine connection established successfully!",
+        environment: "Node.js Core HTTP System",
+        timestamp: new Date().toISOString()
+    };
+    res.end(JSON.stringify(serverPayload));
+});
+
+server.listen(PORT, HOST, () => {
+    console.log(chalk.green.bold("======================================="));
+    console.log(chalk.cyan.bold(`Server is active and listening for traffic!`));
+    console.log(chalk.yellow(`Access endpoint at: http://${HOST}:${PORT}`));
+    console.log(chalk.green.bold("======================================="));
+    console.log(chalk.gray("Press Ctrl + C to stop the server process\n"));
+});
