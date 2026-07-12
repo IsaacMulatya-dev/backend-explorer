@@ -3,44 +3,43 @@ const chalk = require('chalk');
 
 const app = express();
 const PORT = 3000;
+app.use(express.json());
 
 const mockGoals = [
     { id: 1, title: "Master HTML & CSS layouts perfectly", completed: true },
     { id: 2, title: "Learn how to use JavaScript for interactivity", completed: true },
-    { id: 3, title: "Deploy a live portfolio site to the web", completed: true },
-    { id: 4, title: "Master React & Core Hooks", completed: true },
-    { id: 5, title: "Architect production Express.js Backends", completed: false }
+    { id: 3, title: "Deploy a live portfolio site to the web", completed: true }
 ];
-
-app.get('/', (req, res) => {
-    res.json({ message: "Welcome to the Tech Goals Production API Engine." });
-});
 
 app.get('/api/goals', (req, res) => {
     console.log(chalk.blue("[API Read]: Fetching entire goals collection."));
     res.json(mockGoals);
 });
 
-app.get('/api/goals/:id', (req, res) => {
+app.post('/api/goals', (req, res) => {
+    console.log(chalk.green("[API Create]: Incoming POST request detected."));
+    
+    const { title } = req.body;
 
-    const goalId = parseInt(req.params.id, 10);
-    console.log(chalk.yellow(`[API Read]: Searching for resource ID: ${goalId}`));
-
-
-    const foundGoal = mockGoals.find(goal => goal.id === goalId);
-
-    if (!foundGoal) {
-        return res.status(404).json({ 
-            error: "Resource Not Found", 
-            message: `Goal record with ID ${goalId} does not exist in our system archives.` 
+    if (!title || title.trim() === "") {
+        return res.status(400).json({
+            error: "Validation Failed",
+            message: "The property 'title' is strictly required and cannot be empty."
         });
     }
+    const newGoal = {
+        id: mockGoals.length + 1,
+        title: title.trim(),
+        completed: false
+    };
 
-    res.json(foundGoal);
+    mockGoals.push(newGoal);
+
+    res.status(201).json(newGoal);
 });
 
 app.listen(PORT, () => {
     console.log(chalk.green.bold("======================================="));
-    console.log(chalk.cyan.bold(`REST API Live at: http://localhost:${PORT}`));
+    console.log(chalk.cyan.bold(`Secure Data Engine active at: http://localhost:${PORT}`));
     console.log(chalk.green.bold("======================================="));
 });
