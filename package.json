@@ -20,6 +20,8 @@
   "homepage": "https://github.com/IsaacMulatya-dev/backend-explorer#readme",
   "dependencies": {
     "chalk": "^4.1.2",
-    "express": "^5.2.1"
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "pg": "^8.22.0"
   }
 }
