@@ -100,3 +100,29 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
 });
+const connectMongo = require('./dbMongo');
+const UserMongo = require('./models/UserMongo');
+
+// Initialize MongoDB Connection alongside PostgreSQL
+connectMongo();
+
+
+// Create a new document in MongoDB
+app.post('/api/mongo/users', async (req, res) => {
+  try {
+    const user = await UserMongo.create(req.body);
+    res.status(201).json({ success: true, data: user });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// Fetch all documents from MongoDB
+app.get('/api/mongo/users', async (req, res) => {
+  try {
+    const users = await UserMongo.find();
+    res.json({ success: true, count: users.length, data: users });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
