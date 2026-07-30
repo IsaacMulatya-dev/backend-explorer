@@ -117,7 +117,43 @@ app.get('/api/mongo/posts', async (req, res) => {
 // START SERVER (Always at the very bottom)
 // ==========================================
 const PORT = process.env.PORT || 5000;
+// ==========================================
+// MONGODB AGGREGATION ROUTES
+// ==========================================
 
+// GET /api/mongo/analytics/skills -> Aggregates skill counts across all users
+app.get('/api/mongo/analytics/skills', async (req, res) => {
+  try {
+    const skillStats = await UserMongo.aggregate([
+      // Stage 1: Deconstruct skills array (1 user document -> N skill documents)
+      { $unwind: '$skills' },
+
+      // Stage 2: Group by skill name and calculate count
+      {
+        $group: {
+          _id: '$skills',            // Group key
+          totalDevelopers: { $sum: 1 } // Increment count by 1 for each match
+        }
+      },
+
+      // Stage 3: Sort by total developers descending (-1)
+      { $sort: { totalDevelopers: -1 } },
+
+      // Stage 4: Reshape output fields cleanly
+      {
+        $project: {
+          _id: 0,                   // Exclude default _id field
+          skill: '$_id',             // Rename _id to skill
+          totalDevelopers: 1
+        }
+      }
+    ]);
+
+    res.json({ success: true, count: skillStats.length, data: skillStats });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
 });
