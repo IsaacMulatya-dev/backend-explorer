@@ -4,16 +4,17 @@ const app = express();
 // Middleware
 app.use(express.json());
 
-// Connection imports
+// Connection & Model imports
 const pool = require('./db');
 const connectMongo = require('./dbMongo');
 const UserMongo = require('./models/UserMongo');
+const PostMongo = require('./models/PostMongo');
 
 // Connect Databases
 connectMongo();
 
 // ==========================================
-// MONGODB FULL CRUD ROUTES
+// MONGODB USER ROUTES
 // ==========================================
 
 // 1. CREATE: Add a new user document
@@ -86,7 +87,34 @@ app.delete('/api/mongo/users/:id', async (req, res) => {
 });
 
 // ==========================================
-// START SERVER (Always at the bottom)
+// MONGODB POST ROUTES (Day 20 - Relationships & Populate)
+// ==========================================
+
+// 1. CREATE: Create a post referencing a user ID
+app.post('/api/mongo/posts', async (req, res) => {
+  try {
+    const post = await PostMongo.create(req.body);
+    res.status(201).json({ success: true, data: post });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// 2. READ: Get all posts populated with author details
+app.get('/api/mongo/posts', async (req, res) => {
+  try {
+    const posts = await PostMongo.find()
+      .populate('author', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, count: posts.length, data: posts });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==========================================
+// START SERVER (Always at the very bottom)
 // ==========================================
 const PORT = process.env.PORT || 5000;
 
