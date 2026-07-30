@@ -9,14 +9,18 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: [true, 'Email is required'],
-    unique: true,
-    lowercase: true
+    unique: true,   // Automatically creates a unique single-field index
+    lowercase: true,
+    index: true     // Explicit single-field index
   },
-  skills: [String], // Array of strings supported out of the box!
+  skills: [String],
   createdAt: {
     type: Date,
     default: Date.now
   }
 });
+
+// Compound Index: Optimizes queries filtering by name and sorting by creation date
+userSchema.index({ name: 1, createdAt: -1 });
 
 module.exports = mongoose.model('UserMongo', userSchema);

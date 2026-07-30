@@ -157,3 +157,27 @@ app.get('/api/mongo/analytics/skills', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
 });
+// ==========================================
+// MONGODB INDEXING & PERFORMANCE
+// ==========================================
+
+// GET /api/mongo/performance/explain -> Inspects query execution strategy
+app.get('/api/mongo/performance/explain', async (req, res) => {
+  try {
+    // Run explain on a query searching by email
+    const explanation = await UserMongo.find({ email: 'isaac.mongo@example.com' })
+      .explain('executionStats');
+
+    const stats = explanation.executionStats;
+
+    res.json({
+      success: true,
+      executionStage: stats.executionStages.stage, // COLLSCAN or IXSCAN
+      totalDocsExamined: stats.totalDocsExamined,  // Documents scanned
+      nReturned: stats.nReturned,                  // Matching documents returned
+      executionTimeMillis: stats.executionTimeMillis // Time taken in milliseconds
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
