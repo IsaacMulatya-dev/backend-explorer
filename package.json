@@ -19,9 +19,11 @@
   },
   "homepage": "https://github.com/IsaacMulatya-dev/backend-explorer#readme",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "chalk": "^4.1.2",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.8.1",
     "pg": "^8.22.0"
   }

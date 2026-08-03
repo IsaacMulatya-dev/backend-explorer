@@ -10,10 +10,12 @@ const connectMongo = require('./dbMongo');
 const UserMongo = require('./models/UserMongo');
 const PostMongo = require('./models/PostMongo');
 
-// Error Handling & Utility Imports (Day 23)
+// Error Handling & Utility Imports (Day 23 & 24)
 const AppError = require('./utils/AppError');
 const catchAsync = require('./utils/catchAsync');
 const errorHandler = require('./middleware/errorHandler');
+const generateToken = require('./utils/generateToken');
+const { protect } = require('./middleware/authMiddleware');
 
 // Connect Databases
 connectMongo();
@@ -128,8 +130,59 @@ app.get('/api/mongo/performance/explain', catchAsync(async (req, res, next) => {
 }));
 
 // ==========================================
-// ERROR HANDLING DEMO & UNHANDLED ROUTES
+// AUTHENTICATION ROUTES (Day 24)
 // ==========================================
+
+// 1. REGISTER USER
+app.post('/api/auth/register', catchAsync(async (req, res, next) => {
+  const { name, email, password } = req.body;
+
+  const newUser = await UserMongo.create({ name, email, password });
+
+  // Hide hashed password in output
+  newUser.password = undefined;
+
+  const token = generateToken(newUser._id);
+
+  res.status(201).json({
+    success: true,
+    token,
+    data: { user: newUser }
+  });
+}));
+
+// 2. LOGIN USER
+app.post('/api/auth/login', catchAsync(async (req, res, next) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return next(new AppError('Please provide email and password!', 400));
+  }
+
+  const user = await UserMongo.findOne({ email }).select('+password');
+
+  if (!user || !(await user.correctPassword(password, user.password))) {
+    return next(new AppError('Incorrect email or password', 401));
+  }
+
+  const token = generateToken(user._id);
+
+  user.password = undefined;
+
+  res.json({
+    success: true,
+    token,
+    data: { user }
+  });
+}));
+
+// 3. PROTECTED ROUTE DEMO
+app.get('/api/auth/me', protect, catchAsync(async (req, res, next) => {
+  res.json({
+    success: true,
+    data: { user: req.user }
+  });
+}));
 
 // Demo custom error route
 app.get('/api/mongo/users/test-error/:id', catchAsync(async (req, res, next) => {
@@ -139,16 +192,20 @@ app.get('/api/mongo/users/test-error/:id', catchAsync(async (req, res, next) => 
   res.json({ success: true, message: 'Valid ID passed!' });
 }));
 
+// ==========================================
+// UNHANDLED ROUTES & GLOBAL ERROR HANDLER
+// ==========================================
+
 // Handle Unhandled / 404 Routes (Catch-all middleware)
 app.use((req, res, next) => {
   next(new AppError(`Cannot find ${req.originalUrl} on this server!`, 404));
 });
 
-// Global Error Handling Middleware (MUST BE LAST app.use)
+// Global Error Handling Middleware (MUST BE VERY LAST app.use)
 app.use(errorHandler);
 
 // ==========================================
-// START SERVER
+// START SERVER (MUST BE AT THE VERY BOTTOM)
 // ==========================================
 const PORT = process.env.PORT || 5000;
 

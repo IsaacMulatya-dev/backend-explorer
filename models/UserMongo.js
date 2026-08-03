@@ -1,26 +1,46 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
-const userSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: [true, 'Name is required'],
-    trim: true
+const userSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: [true, 'Please provide a name'],
+      trim: true,
+    },
+    email: {
+      type: String,
+      required: [true, 'Please provide an email'],
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
+    password: {
+      type: String,
+      required: [true, 'Please provide a password'],
+      minlength: 6,
+      select: false, // Prevents password from returning in queries by default
+    },
+    role: {
+      type: String,
+      enum: ['user', 'admin'],
+      default: 'user',
+    },
   },
-  email: {
-    type: String,
-    required: [true, 'Email is required'],
-    unique: true,   // Automatically creates a unique single-field index
-    lowercase: true,
-    index: true     // Explicit single-field index
-  },
-  skills: [String],
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
+  { timestamps: true }
+);
+
+// Pre-Save Hook: Automatically hash password before saving
+userSchema.pre('save', async function () {
+  if (!this.isModified('password')) return;
+
+  // Hash password with cost factor of 12
+  this.password = await bcrypt.hash(this.password, 12);
 });
 
-// Compound Index: Optimizes queries filtering by name and sorting by creation date
-userSchema.index({ name: 1, createdAt: -1 });
+//  Instance Method: Verify plain password against hashed password
+userSchema.methods.correctPassword = async function (candidatePassword, userPassword) {
+  return await bcrypt.compare(candidatePassword, userPassword);
+};
 
 module.exports = mongoose.model('UserMongo', userSchema);
