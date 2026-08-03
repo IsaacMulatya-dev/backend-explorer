@@ -10,7 +10,7 @@ const connectMongo = require('./dbMongo');
 const UserMongo = require('./models/UserMongo');
 const PostMongo = require('./models/PostMongo');
 
-// Error Handling & Utility Imports (Day 23 & 24)
+// Error Handling & Utility Imports
 const AppError = require('./utils/AppError');
 const catchAsync = require('./utils/catchAsync');
 const errorHandler = require('./middleware/errorHandler');
@@ -21,7 +21,7 @@ const { protect } = require('./middleware/authMiddleware');
 connectMongo();
 
 // ==========================================
-// MONGODB USER ROUTES
+// MONGODB USER CRUD ROUTES
 // ==========================================
 
 // 1. CREATE: Add a new user document
@@ -68,69 +68,7 @@ app.delete('/api/mongo/users/:id', catchAsync(async (req, res, next) => {
 }));
 
 // ==========================================
-// MONGODB POST ROUTES
-// ==========================================
-
-// 1. CREATE: Create a post referencing a user ID
-app.post('/api/mongo/posts', catchAsync(async (req, res, next) => {
-  const post = await PostMongo.create(req.body);
-  res.status(201).json({ success: true, data: post });
-}));
-
-// 2. READ: Get all posts populated with author details
-app.get('/api/mongo/posts', catchAsync(async (req, res, next) => {
-  const posts = await PostMongo.find()
-    .populate('author', 'name email')
-    .sort({ createdAt: -1 });
-
-  res.json({ success: true, count: posts.length, data: posts });
-}));
-
-// ==========================================
-// MONGODB AGGREGATION & PERFORMANCE ROUTES
-// ==========================================
-
-// Aggregates skill counts across all users
-app.get('/api/mongo/analytics/skills', catchAsync(async (req, res, next) => {
-  const skillStats = await UserMongo.aggregate([
-    { $unwind: '$skills' },
-    {
-      $group: {
-        _id: '$skills',
-        totalDevelopers: { $sum: 1 }
-      }
-    },
-    { $sort: { totalDevelopers: -1 } },
-    {
-      $project: {
-        _id: 0,
-        skill: '$_id',
-        totalDevelopers: 1
-      }
-    }
-  ]);
-
-  res.json({ success: true, count: skillStats.length, data: skillStats });
-}));
-
-// Inspects query execution strategy
-app.get('/api/mongo/performance/explain', catchAsync(async (req, res, next) => {
-  const explanation = await UserMongo.find({ email: 'isaac.mongo@example.com' })
-    .explain('executionStats');
-
-  const stats = explanation.executionStats;
-
-  res.json({
-    success: true,
-    executionStage: stats.executionStages.stage,
-    totalDocsExamined: stats.totalDocsExamined,
-    nReturned: stats.nReturned,
-    executionTimeMillis: stats.executionTimeMillis
-  });
-}));
-
-// ==========================================
-// AUTHENTICATION ROUTES (Day 24)
+// AUTHENTICATION ROUTES
 // ==========================================
 
 // 1. REGISTER USER
@@ -176,7 +114,7 @@ app.post('/api/auth/login', catchAsync(async (req, res, next) => {
   });
 }));
 
-// 3. PROTECTED ROUTE DEMO
+// 3. PROTECTED PROFILE ROUTE
 app.get('/api/auth/me', protect, catchAsync(async (req, res, next) => {
   res.json({
     success: true,
@@ -184,7 +122,149 @@ app.get('/api/auth/me', protect, catchAsync(async (req, res, next) => {
   });
 }));
 
-// Demo custom error route
+// ==========================================
+// ADVANCED POST & POPULATION ROUTES
+// ==========================================
+
+// 1. CREATE POST (Authenticated)
+app.post('/api/posts', protect, catchAsync(async (req, res, next) => {
+  const newPost = await PostMongo.create({
+    title: req.body.title,
+    content: req.body.content,
+    category: req.body.category,
+    author: req.user._id,
+  });
+
+  res.status(201).json({
+    success: true,
+    data: { post: newPost },
+  });
+}));
+
+// 2. READ ALL POSTS (With Population, Filtering & Pagination)
+app.get('/api/posts', catchAsync(async (req, res, next) => {
+  const queryObj = { ...req.query };
+  const excludedFields = ['page', 'sort', 'limit', 'fields'];
+  excludedFields.forEach((el) => delete queryObj[el]);
+
+  const page = parseInt(req.query.page, 10) || 1;
+  const limit = parseInt(req.query.limit, 10) || 10;
+  const skip = (page - 1) * limit;
+
+  const posts = await PostMongo.find(queryObj)
+    .populate('author', 'name email role')
+    .sort('-createdAt')
+    .skip(skip)
+    .limit(limit);
+
+  const totalPosts = await PostMongo.countDocuments(queryObj);
+
+  res.json({
+    success: true,
+    results: posts.length,
+    pagination: {
+      page,
+      limit,
+      totalPages: Math.ceil(totalPosts / limit),
+      totalPosts,
+    },
+    data: { posts },
+  });
+}));
+
+// 3. READ SINGLE POST (With Author Population)
+app.get('/api/posts/:id', catchAsync(async (req, res, next) => {
+  const post = await PostMongo.findById(req.params.id).populate('author', 'name email');
+
+  if (!post) {
+    return next(new AppError('No post found with that ID', 404));
+  }
+
+  res.json({
+    success: true,
+    data: { post },
+  });
+}));
+
+// ==========================================
+// DATA AGGREGATION & ANALYTICS ROUTES
+// ==========================================
+
+// 1. ANALYTICS: Calculate Post Stats by Category
+app.get('/api/analytics/post-stats', catchAsync(async (req, res, next) => {
+  const stats = await PostMongo.aggregate([
+    {
+      $match: { content: { $exists: true, $ne: '' } }
+    },
+    {
+      $group: {
+        _id: { $toUpper: '$category' },
+        numPosts: { $sum: 1 },
+        avgTitleLength: { $avg: { $strLenCP: '$title' } },
+      }
+    },
+    {
+      $sort: { numPosts: -1 }
+    },
+    {
+      $project: {
+        _id: 0,
+        category: '$_id',
+        numPosts: 1,
+        avgTitleLength: { $round: ['$avgTitleLength', 1] }
+      }
+    }
+  ]);
+
+  res.json({
+    success: true,
+    results: stats.length,
+    data: { stats }
+  });
+}));
+
+// 2. ANALYTICS: Author Activity Stats ($lookup join)
+app.get('/api/analytics/author-stats', catchAsync(async (req, res, next) => {
+  const authorStats = await PostMongo.aggregate([
+    {
+      $group: {
+        _id: '$author',
+        totalPosts: { $sum: 1 }
+      }
+    },
+    {
+      $lookup: {
+        from: 'usermongos',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'authorDetails'
+      }
+    },
+    {
+      $unwind: '$authorDetails'
+    },
+    {
+      $project: {
+        _id: 0,
+        authorId: '$_id',
+        name: '$authorDetails.name',
+        email: '$authorDetails.email',
+        totalPosts: 1
+      }
+    },
+    {
+      $sort: { totalPosts: -1 }
+    }
+  ]);
+
+  res.json({
+    success: true,
+    results: authorStats.length,
+    data: { authorStats }
+  });
+}));
+
+// Demo custom operational error test route
 app.get('/api/mongo/users/test-error/:id', catchAsync(async (req, res, next) => {
   if (req.params.id === 'invalid') {
     return next(new AppError('This is a custom operational error test!', 400));
@@ -196,16 +276,16 @@ app.get('/api/mongo/users/test-error/:id', catchAsync(async (req, res, next) => 
 // UNHANDLED ROUTES & GLOBAL ERROR HANDLER
 // ==========================================
 
-// Handle Unhandled / 404 Routes (Catch-all middleware)
+// Catch-all for undefined routes
 app.use((req, res, next) => {
   next(new AppError(`Cannot find ${req.originalUrl} on this server!`, 404));
 });
 
-// Global Error Handling Middleware (MUST BE VERY LAST app.use)
+// Global Error Handling Middleware
 app.use(errorHandler);
 
 // ==========================================
-// START SERVER (MUST BE AT THE VERY BOTTOM)
+// START SERVER
 // ==========================================
 const PORT = process.env.PORT || 5000;
 
