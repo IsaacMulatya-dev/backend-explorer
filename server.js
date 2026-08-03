@@ -1,6 +1,42 @@
 const express = require('express');
 const app = express();
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
+const mongoSanitize = require('express-mongo-sanitize');
 
+// ==========================================
+// GLOBAL SECURITY MIDDLEWARE (Day 27)
+// ==========================================
+
+// 1. Set Security HTTP Headers
+app.use(helmet());
+
+// 2. Limit Requests from Same IP (Global Rate Limiter: 100 requests per 15 minutes)
+const globalLimiter = rateLimit({
+  max: 100,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  message: 'Too many requests from this IP, please try again in 15 minutes!',
+});
+app.use('/api', globalLimiter);
+
+// 3. Strict Rate Limiter for Authentication Endpoints (5 attempts per hour)
+const authLimiter = rateLimit({
+  max: 5,
+  windowMs: 60 * 60 * 1000, // 1 hour
+  message: 'Too many failed login/registration attempts, please try again in an hour!',
+});
+app.use('/api/auth/login', authLimiter);
+
+// 4. Body Parser (Limit body payload to 10kb to prevent payload flood)
+app.use(express.json({ limit: '10kb' }));
+
+// 5. Data Sanitization against NoSQL Query Injection (e.g., prevents {"$gt": ""})
+// FIX: Modern configuration that skips trying to overwrite read-only req.query
+app.use((req, res, next) => {
+  if (req.body) mongoSanitize.sanitize(req.body);
+  if (req.params) mongoSanitize.sanitize(req.params);
+  next();
+});
 // Core Middleware
 app.use(express.json());
 
