@@ -3,42 +3,7 @@ const app = express();
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const mongoSanitize = require('express-mongo-sanitize');
-
-// ==========================================
-// GLOBAL SECURITY MIDDLEWARE (Day 27)
-// ==========================================
-
-// 1. Set Security HTTP Headers
-app.use(helmet());
-
-// 2. Limit Requests from Same IP (Global Rate Limiter: 100 requests per 15 minutes)
-const globalLimiter = rateLimit({
-  max: 100,
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  message: 'Too many requests from this IP, please try again in 15 minutes!',
-});
-app.use('/api', globalLimiter);
-
-// 3. Strict Rate Limiter for Authentication Endpoints (5 attempts per hour)
-const authLimiter = rateLimit({
-  max: 5,
-  windowMs: 60 * 60 * 1000, // 1 hour
-  message: 'Too many failed login/registration attempts, please try again in an hour!',
-});
-app.use('/api/auth/login', authLimiter);
-
-// 4. Body Parser (Limit body payload to 10kb to prevent payload flood)
-app.use(express.json({ limit: '10kb' }));
-
-// 5. Data Sanitization against NoSQL Query Injection (e.g., prevents {"$gt": ""})
-// FIX: Modern configuration that skips trying to overwrite read-only req.query
-app.use((req, res, next) => {
-  if (req.body) mongoSanitize.sanitize(req.body);
-  if (req.params) mongoSanitize.sanitize(req.params);
-  next();
-});
-// Core Middleware
-app.use(express.json());
+const morgan = require('morgan');
 
 // Connection & Model Imports
 const pool = require('./db');
@@ -52,27 +17,65 @@ const catchAsync = require('./utils/catchAsync');
 const errorHandler = require('./middleware/errorHandler');
 const generateToken = require('./utils/generateToken');
 const { protect } = require('./middleware/authMiddleware');
+const logger = require('./utils/logger');
 
 // Connect Databases
 connectMongo();
 
 // ==========================================
+// GLOBAL SECURITY & LOGGING MIDDLEWARE
+// ==========================================
+
+// 1. HTTP Request Logger
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+} else {
+  app.use(morgan('combined'));
+}
+
+// 2. Set Security HTTP Headers
+app.use(helmet());
+
+// 3. Global Rate Limiter (100 requests per 15 minutes)
+const globalLimiter = rateLimit({
+  max: 100,
+  windowMs: 15 * 60 * 1000,
+  message: 'Too many requests from this IP, please try again in 15 minutes!',
+});
+app.use('/api', globalLimiter);
+
+// 4. Strict Rate Limiter for Authentication Endpoints (5 attempts per hour)
+const authLimiter = rateLimit({
+  max: 5,
+  windowMs: 60 * 60 * 1000,
+  message: 'Too many failed login/registration attempts, please try again in an hour!',
+});
+app.use('/api/auth/login', authLimiter);
+
+// 5. Body Parser with 10kb limit (prevents payload flood)
+app.use(express.json({ limit: '10kb' }));
+
+// 6. Safe NoSQL Injection Sanitization (skips read-only req.query)
+app.use((req, res, next) => {
+  if (req.body) mongoSanitize.sanitize(req.body);
+  if (req.params) mongoSanitize.sanitize(req.params);
+  next();
+});
+
+// ==========================================
 // MONGODB USER CRUD ROUTES
 // ==========================================
 
-// 1. CREATE: Add a new user document
 app.post('/api/mongo/users', catchAsync(async (req, res, next) => {
   const user = await UserMongo.create(req.body);
   res.status(201).json({ success: true, data: user });
 }));
 
-// 2. READ: Get all user documents
 app.get('/api/mongo/users', catchAsync(async (req, res, next) => {
   const users = await UserMongo.find().sort({ createdAt: -1 });
   res.json({ success: true, count: users.length, data: users });
 }));
 
-// 3. READ: Get single user document by ID
 app.get('/api/mongo/users/:id', catchAsync(async (req, res, next) => {
   const user = await UserMongo.findById(req.params.id);
   if (!user) {
@@ -81,7 +84,6 @@ app.get('/api/mongo/users/:id', catchAsync(async (req, res, next) => {
   res.json({ success: true, data: user });
 }));
 
-// 4. UPDATE: Modify user document by ID
 app.put('/api/mongo/users/:id', catchAsync(async (req, res, next) => {
   const user = await UserMongo.findByIdAndUpdate(
     req.params.id,
@@ -94,7 +96,6 @@ app.put('/api/mongo/users/:id', catchAsync(async (req, res, next) => {
   res.json({ success: true, data: user });
 }));
 
-// 5. DELETE: Remove user document by ID
 app.delete('/api/mongo/users/:id', catchAsync(async (req, res, next) => {
   const user = await UserMongo.findByIdAndDelete(req.params.id);
   if (!user) {
@@ -107,15 +108,10 @@ app.delete('/api/mongo/users/:id', catchAsync(async (req, res, next) => {
 // AUTHENTICATION ROUTES
 // ==========================================
 
-// 1. REGISTER USER
 app.post('/api/auth/register', catchAsync(async (req, res, next) => {
   const { name, email, password } = req.body;
-
   const newUser = await UserMongo.create({ name, email, password });
-
-  // Hide hashed password in output
   newUser.password = undefined;
-
   const token = generateToken(newUser._id);
 
   res.status(201).json({
@@ -125,7 +121,6 @@ app.post('/api/auth/register', catchAsync(async (req, res, next) => {
   });
 }));
 
-// 2. LOGIN USER
 app.post('/api/auth/login', catchAsync(async (req, res, next) => {
   const { email, password } = req.body;
 
@@ -140,7 +135,6 @@ app.post('/api/auth/login', catchAsync(async (req, res, next) => {
   }
 
   const token = generateToken(user._id);
-
   user.password = undefined;
 
   res.json({
@@ -150,7 +144,6 @@ app.post('/api/auth/login', catchAsync(async (req, res, next) => {
   });
 }));
 
-// 3. PROTECTED PROFILE ROUTE
 app.get('/api/auth/me', protect, catchAsync(async (req, res, next) => {
   res.json({
     success: true,
@@ -162,7 +155,6 @@ app.get('/api/auth/me', protect, catchAsync(async (req, res, next) => {
 // ADVANCED POST & POPULATION ROUTES
 // ==========================================
 
-// 1. CREATE POST (Authenticated)
 app.post('/api/posts', protect, catchAsync(async (req, res, next) => {
   const newPost = await PostMongo.create({
     title: req.body.title,
@@ -177,7 +169,6 @@ app.post('/api/posts', protect, catchAsync(async (req, res, next) => {
   });
 }));
 
-// 2. READ ALL POSTS (With Population, Filtering & Pagination)
 app.get('/api/posts', catchAsync(async (req, res, next) => {
   const queryObj = { ...req.query };
   const excludedFields = ['page', 'sort', 'limit', 'fields'];
@@ -208,7 +199,6 @@ app.get('/api/posts', catchAsync(async (req, res, next) => {
   });
 }));
 
-// 3. READ SINGLE POST (With Author Population)
 app.get('/api/posts/:id', catchAsync(async (req, res, next) => {
   const post = await PostMongo.findById(req.params.id).populate('author', 'name email');
 
@@ -226,12 +216,9 @@ app.get('/api/posts/:id', catchAsync(async (req, res, next) => {
 // DATA AGGREGATION & ANALYTICS ROUTES
 // ==========================================
 
-// 1. ANALYTICS: Calculate Post Stats by Category
 app.get('/api/analytics/post-stats', catchAsync(async (req, res, next) => {
   const stats = await PostMongo.aggregate([
-    {
-      $match: { content: { $exists: true, $ne: '' } }
-    },
+    { $match: { content: { $exists: true, $ne: '' } } },
     {
       $group: {
         _id: { $toUpper: '$category' },
@@ -239,9 +226,7 @@ app.get('/api/analytics/post-stats', catchAsync(async (req, res, next) => {
         avgTitleLength: { $avg: { $strLenCP: '$title' } },
       }
     },
-    {
-      $sort: { numPosts: -1 }
-    },
+    { $sort: { numPosts: -1 } },
     {
       $project: {
         _id: 0,
@@ -259,7 +244,6 @@ app.get('/api/analytics/post-stats', catchAsync(async (req, res, next) => {
   });
 }));
 
-// 2. ANALYTICS: Author Activity Stats ($lookup join)
 app.get('/api/analytics/author-stats', catchAsync(async (req, res, next) => {
   const authorStats = await PostMongo.aggregate([
     {
@@ -276,9 +260,7 @@ app.get('/api/analytics/author-stats', catchAsync(async (req, res, next) => {
         as: 'authorDetails'
       }
     },
-    {
-      $unwind: '$authorDetails'
-    },
+    { $unwind: '$authorDetails' },
     {
       $project: {
         _id: 0,
@@ -288,9 +270,7 @@ app.get('/api/analytics/author-stats', catchAsync(async (req, res, next) => {
         totalPosts: 1
       }
     },
-    {
-      $sort: { totalPosts: -1 }
-    }
+    { $sort: { totalPosts: -1 } }
   ]);
 
   res.json({
@@ -300,31 +280,32 @@ app.get('/api/analytics/author-stats', catchAsync(async (req, res, next) => {
   });
 }));
 
-// Demo custom operational error test route
-app.get('/api/mongo/users/test-error/:id', catchAsync(async (req, res, next) => {
-  if (req.params.id === 'invalid') {
-    return next(new AppError('This is a custom operational error test!', 400));
-  }
-  res.json({ success: true, message: 'Valid ID passed!' });
-}));
-
 // ==========================================
 // UNHANDLED ROUTES & GLOBAL ERROR HANDLER
 // ==========================================
 
-// Catch-all for undefined routes
 app.use((req, res, next) => {
   next(new AppError(`Cannot find ${req.originalUrl} on this server!`, 404));
 });
 
-// Global Error Handling Middleware
 app.use(errorHandler);
 
 // ==========================================
-// START SERVER
+// START SERVER & GRACEFUL SHUTDOWN
 // ==========================================
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
+const server = app.listen(PORT, () => {
+  logger.info(`Server listening on http://localhost:${PORT}`);
 });
+
+const shutdown = (signal) => {
+  logger.warn(`${signal} received. Closing HTTP server cleanly...`);
+  server.close(() => {
+    logger.info('HTTP server closed.');
+    process.exit(0);
+  });
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
