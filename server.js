@@ -1,14 +1,19 @@
 const express = require('express');
 const app = express();
 
-// Middleware
+// Core Middleware
 app.use(express.json());
 
-// Connection & Model imports
+// Connection & Model Imports
 const pool = require('./db');
 const connectMongo = require('./dbMongo');
 const UserMongo = require('./models/UserMongo');
 const PostMongo = require('./models/PostMongo');
+
+// Error Handling & Utility Imports (Day 23)
+const AppError = require('./utils/AppError');
+const catchAsync = require('./utils/catchAsync');
+const errorHandler = require('./middleware/errorHandler');
 
 // Connect Databases
 connectMongo();
@@ -18,166 +23,135 @@ connectMongo();
 // ==========================================
 
 // 1. CREATE: Add a new user document
-app.post('/api/mongo/users', async (req, res) => {
-  try {
-    const user = await UserMongo.create(req.body);
-    res.status(201).json({ success: true, data: user });
-  } catch (err) {
-    if (err.code === 11000) {
-      return res.status(400).json({ success: false, error: 'Email already exists' });
-    }
-    res.status(400).json({ success: false, error: err.message });
-  }
-});
+app.post('/api/mongo/users', catchAsync(async (req, res, next) => {
+  const user = await UserMongo.create(req.body);
+  res.status(201).json({ success: true, data: user });
+}));
 
 // 2. READ: Get all user documents
-app.get('/api/mongo/users', async (req, res) => {
-  try {
-    const users = await UserMongo.find().sort({ createdAt: -1 });
-    res.json({ success: true, count: users.length, data: users });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+app.get('/api/mongo/users', catchAsync(async (req, res, next) => {
+  const users = await UserMongo.find().sort({ createdAt: -1 });
+  res.json({ success: true, count: users.length, data: users });
+}));
 
 // 3. READ: Get single user document by ID
-app.get('/api/mongo/users/:id', async (req, res) => {
-  try {
-    const user = await UserMongo.findById(req.params.id);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-    res.json({ success: true, data: user });
-  } catch (err) {
-    if (err.kind === 'ObjectId') {
-      return res.status(400).json({ success: false, error: 'Invalid document ID format' });
-    }
-    res.status(500).json({ success: false, error: err.message });
+app.get('/api/mongo/users/:id', catchAsync(async (req, res, next) => {
+  const user = await UserMongo.findById(req.params.id);
+  if (!user) {
+    return next(new AppError('User not found', 404));
   }
-});
+  res.json({ success: true, data: user });
+}));
 
 // 4. UPDATE: Modify user document by ID
-app.put('/api/mongo/users/:id', async (req, res) => {
-  try {
-    const user = await UserMongo.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    );
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-    res.json({ success: true, data: user });
-  } catch (err) {
-    res.status(400).json({ success: false, error: err.message });
+app.put('/api/mongo/users/:id', catchAsync(async (req, res, next) => {
+  const user = await UserMongo.findByIdAndUpdate(
+    req.params.id,
+    req.body,
+    { new: true, runValidators: true }
+  );
+  if (!user) {
+    return next(new AppError('User not found', 404));
   }
-});
+  res.json({ success: true, data: user });
+}));
 
 // 5. DELETE: Remove user document by ID
-app.delete('/api/mongo/users/:id', async (req, res) => {
-  try {
-    const user = await UserMongo.findByIdAndDelete(req.params.id);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-    res.json({ success: true, message: 'User deleted successfully' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+app.delete('/api/mongo/users/:id', catchAsync(async (req, res, next) => {
+  const user = await UserMongo.findByIdAndDelete(req.params.id);
+  if (!user) {
+    return next(new AppError('User not found', 404));
   }
-});
+  res.json({ success: true, message: 'User deleted successfully' });
+}));
 
 // ==========================================
-// MONGODB POST ROUTES (Day 20 - Relationships & Populate)
+// MONGODB POST ROUTES
 // ==========================================
 
 // 1. CREATE: Create a post referencing a user ID
-app.post('/api/mongo/posts', async (req, res) => {
-  try {
-    const post = await PostMongo.create(req.body);
-    res.status(201).json({ success: true, data: post });
-  } catch (err) {
-    res.status(400).json({ success: false, error: err.message });
-  }
-});
+app.post('/api/mongo/posts', catchAsync(async (req, res, next) => {
+  const post = await PostMongo.create(req.body);
+  res.status(201).json({ success: true, data: post });
+}));
 
 // 2. READ: Get all posts populated with author details
-app.get('/api/mongo/posts', async (req, res) => {
-  try {
-    const posts = await PostMongo.find()
-      .populate('author', 'name email')
-      .sort({ createdAt: -1 });
+app.get('/api/mongo/posts', catchAsync(async (req, res, next) => {
+  const posts = await PostMongo.find()
+    .populate('author', 'name email')
+    .sort({ createdAt: -1 });
 
-    res.json({ success: true, count: posts.length, data: posts });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+  res.json({ success: true, count: posts.length, data: posts });
+}));
 
 // ==========================================
-// START SERVER (Always at the very bottom)
+// MONGODB AGGREGATION & PERFORMANCE ROUTES
+// ==========================================
+
+// Aggregates skill counts across all users
+app.get('/api/mongo/analytics/skills', catchAsync(async (req, res, next) => {
+  const skillStats = await UserMongo.aggregate([
+    { $unwind: '$skills' },
+    {
+      $group: {
+        _id: '$skills',
+        totalDevelopers: { $sum: 1 }
+      }
+    },
+    { $sort: { totalDevelopers: -1 } },
+    {
+      $project: {
+        _id: 0,
+        skill: '$_id',
+        totalDevelopers: 1
+      }
+    }
+  ]);
+
+  res.json({ success: true, count: skillStats.length, data: skillStats });
+}));
+
+// Inspects query execution strategy
+app.get('/api/mongo/performance/explain', catchAsync(async (req, res, next) => {
+  const explanation = await UserMongo.find({ email: 'isaac.mongo@example.com' })
+    .explain('executionStats');
+
+  const stats = explanation.executionStats;
+
+  res.json({
+    success: true,
+    executionStage: stats.executionStages.stage,
+    totalDocsExamined: stats.totalDocsExamined,
+    nReturned: stats.nReturned,
+    executionTimeMillis: stats.executionTimeMillis
+  });
+}));
+
+// ==========================================
+// ERROR HANDLING DEMO & UNHANDLED ROUTES
+// ==========================================
+
+// Demo custom error route
+app.get('/api/mongo/users/test-error/:id', catchAsync(async (req, res, next) => {
+  if (req.params.id === 'invalid') {
+    return next(new AppError('This is a custom operational error test!', 400));
+  }
+  res.json({ success: true, message: 'Valid ID passed!' });
+}));
+
+// Handle Unhandled / 404 Routes (Catch-all middleware)
+app.use((req, res, next) => {
+  next(new AppError(`Cannot find ${req.originalUrl} on this server!`, 404));
+});
+
+// Global Error Handling Middleware (MUST BE LAST app.use)
+app.use(errorHandler);
+
+// ==========================================
+// START SERVER
 // ==========================================
 const PORT = process.env.PORT || 5000;
-// ==========================================
-// MONGODB AGGREGATION ROUTES
-// ==========================================
 
-// GET /api/mongo/analytics/skills -> Aggregates skill counts across all users
-app.get('/api/mongo/analytics/skills', async (req, res) => {
-  try {
-    const skillStats = await UserMongo.aggregate([
-      // Stage 1: Deconstruct skills array (1 user document -> N skill documents)
-      { $unwind: '$skills' },
-
-      // Stage 2: Group by skill name and calculate count
-      {
-        $group: {
-          _id: '$skills',            // Group key
-          totalDevelopers: { $sum: 1 } // Increment count by 1 for each match
-        }
-      },
-
-      // Stage 3: Sort by total developers descending (-1)
-      { $sort: { totalDevelopers: -1 } },
-
-      // Stage 4: Reshape output fields cleanly
-      {
-        $project: {
-          _id: 0,                   // Exclude default _id field
-          skill: '$_id',             // Rename _id to skill
-          totalDevelopers: 1
-        }
-      }
-    ]);
-
-    res.json({ success: true, count: skillStats.length, data: skillStats });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
-});
-// ==========================================
-// MONGODB INDEXING & PERFORMANCE
-// ==========================================
-
-// GET /api/mongo/performance/explain -> Inspects query execution strategy
-app.get('/api/mongo/performance/explain', async (req, res) => {
-  try {
-    // Run explain on a query searching by email
-    const explanation = await UserMongo.find({ email: 'isaac.mongo@example.com' })
-      .explain('executionStats');
-
-    const stats = explanation.executionStats;
-
-    res.json({
-      success: true,
-      executionStage: stats.executionStages.stage, // COLLSCAN or IXSCAN
-      totalDocsExamined: stats.totalDocsExamined,  // Documents scanned
-      nReturned: stats.nReturned,                  // Matching documents returned
-      executionTimeMillis: stats.executionTimeMillis // Time taken in milliseconds
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
 });
